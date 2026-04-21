@@ -11,6 +11,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    # -----------------------
+    # Checkout repositories
+    # -----------------------
     - name: Checkout builder repo
       uses: actions/checkout@v3
       with:
@@ -23,10 +26,13 @@ jobs:
         repository: Adaptix-Framework/AdaptixC2
         path: source
 
+    # -----------------------
+    # Install server dependencies
+    # -----------------------
     - name: Install server dependencies
       run: |
         sudo apt update
-        sudo apt install -y mingw-w64 make gcc g++ g++-mingw-w64 git wget unzip
+        sudo apt install -y mingw-w64 make gcc g++ g++-mingw-w64 git wget unzip build-essential
 
         # Install Go 1.25.4
         wget https://go.dev/dl/go1.25.4.linux-amd64.tar.gz -O /tmp/go1.25.4.linux-amd64.tar.gz
@@ -34,21 +40,47 @@ jobs:
         sudo tar -C /usr/local -xzf /tmp/go1.25.4.linux-amd64.tar.gz
         sudo ln -s /usr/local/go/bin/go /usr/local/bin/go
 
-        # Windows 7 support by gopher agent
+        # Windows 7 support for gopher agent
         git clone https://github.com/Adaptix-Framework/go-win7 /tmp/go-win7
         sudo mv /tmp/go-win7 /usr/lib/
 
-    - name: Install client dependencies
+    # -----------------------
+    # Install client dependencies (Qt 6.8.0)
+    # -----------------------
+    - name: Install Qt 6.8.0 and client deps
       run: |
-        sudo apt install -y gcc g++ build-essential make cmake mingw-w64 g++-mingw-w64 \
-          libssl-dev qt6-base-dev qt6-base-private-dev libxkbcommon-dev qt6-websockets-dev \
-          qt6-declarative-dev qt6-svg-dev libgl1-mesa-dev ninja-build
+        sudo apt update
+        sudo apt install -y gcc g++ build-essential cmake ninja-build mingw-w64 g++-mingw-w64 \
+            libssl-dev libgl1-mesa-dev
 
-    - name: Build everything (amd64)
+        # Download Qt 6.8.0 source
+        wget https://download.qt.io/archive/qt/6.8/6.8.0/qt-everywhere-src-6.8.0.tar.xz -O /tmp/qt6.8.0.tar.xz
+        mkdir -p $HOME/Qt6.8.0
+        tar -xf /tmp/qt6.8.0.tar.xz -C $HOME/Qt6.8.0 --strip-components=1
+
+        # Build Qt 6.8.0
+        cd $HOME/Qt6.8.0
+        mkdir build && cd build
+        ../configure -prefix $HOME/Qt6.8.0/installed -nomake examples -nomake tests
+        make -j$(nproc)
+        make install
+
+        # Set environment variables
+        echo "$HOME/Qt6.8.0/installed/lib/cmake/Qt6" >> $GITHUB_ENV
+        echo "$HOME/Qt6.8.0/installed/bin" >> $GITHUB_PATH
+
+    # -----------------------
+    # Build everything
+    # -----------------------
+    - name: Build AdaptixC2
       run: |
+        export CMAKE_PREFIX_PATH=$HOME/Qt6.8.0/installed/lib/cmake/Qt6
         cd builder
         make all SRC=../source
 
+    # -----------------------
+    # Prepare artifacts
+    # -----------------------
     - name: Prepare artifacts
       run: |
         mkdir -p artifacts
@@ -56,7 +88,10 @@ jobs:
         cp -r builder/output/client artifacts/AdaptixC2Client-amd64
         cp -r builder/output/extender artifacts/AdaptixC2Extender-amd64
 
-    - name: Create GitHub Release
+    # -----------------------
+    # Create GitHub Release
+    # -----------------------
+    - name: Create Release
       id: release
       uses: actions/create-release@v1
       with:
@@ -67,6 +102,9 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+    # -----------------------
+    # Upload assets
+    # -----------------------
     - name: Upload Server
       uses: actions/upload-release-asset@v1
       with:
