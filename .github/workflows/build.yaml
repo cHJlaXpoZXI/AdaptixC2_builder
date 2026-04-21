@@ -30,6 +30,7 @@ jobs:
 
     - name: Build Docker image for ${{ matrix.arch }}
       run: |
+        echo "Building Docker image locally without login..."
         docker buildx build \
           --platform linux/${{ matrix.arch }} \
           --output type=tar,dest=adaptixc2-${{ matrix.arch }}.tar \
@@ -48,7 +49,7 @@ jobs:
         cp -r ./output-${{ matrix.arch }}/client/* ./artifacts-${{ matrix.arch }}/AdaptixC2Client-${{ matrix.arch }}.AppImage
         cp -r ./output-${{ matrix.arch }}/extender/* ./artifacts-${{ matrix.arch }}/AdaptixC2Extender-${{ matrix.arch }}
 
-    - name: Create GitHub Release (once per push)
+    - name: Create GitHub Release (amd64 only)
       if: matrix.arch == 'amd64'
       id: create_release
       uses: actions/create-release@v1
