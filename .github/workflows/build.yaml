@@ -28,18 +28,10 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
 
-    - name: Log in to Docker Hub (optional if pushing images)
-      uses: docker/login-action@v2
-      with:
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
-
-    - name: Build Docker image for ${{ matrix.arch }} with caching
+    - name: Build Docker image for ${{ matrix.arch }}
       run: |
         docker buildx build \
           --platform linux/${{ matrix.arch }} \
-          --cache-from=type=registry,ref=adaptixc2/cache:${{ matrix.arch }} \
-          --cache-to=type=registry,ref=adaptixc2/cache:${{ matrix.arch }},mode=max \
           --output type=tar,dest=adaptixc2-${{ matrix.arch }}.tar \
           -f Dockerfile \
           .
