@@ -1,86 +1,116 @@
-name: Build AdaptixC2 Multi-Arch Release
+name: Build AdaptixC2 (Auto Version + Multi-Arch Release)
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
-  workflow_dispatch:
 
 jobs:
-  build-release:
+  prepare:
     runs-on: ubuntu-latest
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+
+    steps:
+    - name: Get latest AdaptixC2 version tag
+      id: get_version
+      run: |
+        VERSION=$(curl -s https://api.github.com/repos/Adaptix-Framework/AdaptixC2/releases/latest | jq -r .tag_name)
+
+        if [ "$VERSION" = "null" ] || [ -z "$VERSION" ]; then
+          VERSION="dev-$(date +%Y%m%d-%H%M%S)"
+        fi
+
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Detected version: $VERSION"
+
+  build:
+    needs: prepare
+    runs-on: ubuntu-latest
 
     strategy:
       matrix:
         arch: [amd64, arm64]
 
     steps:
-    - name: Checkout repository
+    - name: Checkout AdaptixC2 (official main branch)
       uses: actions/checkout@v3
+      with:
+        repository: Adaptix-Framework/AdaptixC2
 
-    - name: Set up QEMU for multi-arch
+    - name: Set version env
+      run: echo "VERSION=${{ needs.prepare.outputs.version }}" >> $GITHUB_ENV
+
+    - name: Prepare required build folders (NO Dockerfile changes)
+      run: |
+        mkdir -p AdaptixServer/server-dist/extenders
+
+    - name: Set up QEMU
       uses: docker/setup-qemu-action@v2
       with:
         platforms: amd64, arm64
 
-    - name: Set up Docker Buildx
+    - name: Set up Buildx
       uses: docker/setup-buildx-action@v2
 
-    - name: Build Docker image for ${{ matrix.arch }}
+    - name: Build Docker image (no login, no push)
       run: |
-        echo "Building Docker image locally without login..."
         docker buildx build \
           --platform linux/${{ matrix.arch }} \
-          --output type=tar,dest=adaptixc2-${{ matrix.arch }}.tar \
-          -f Dockerfile \
-          .
+          --output type=tar,dest=adaptix-${{ matrix.arch }}.tar \
+          -f Dockerfile .
 
-    - name: Extract Docker image for ${{ matrix.arch }}
+    - name: Extract build output
       run: |
-        mkdir -p ./output-${{ matrix.arch }}
-        tar -xf adaptixc2-${{ matrix.arch }}.tar -C ./output-${{ matrix.arch }}
+        mkdir -p out-${{ matrix.arch }}
+        tar -xf adaptix-${{ matrix.arch }}.tar -C out-${{ matrix.arch }}
 
-    - name: Prepare artifacts for ${{ matrix.arch }}
+    - name: Prepare artifacts
       run: |
-        mkdir -p ./artifacts-${{ matrix.arch }}
-        cp -r ./output-${{ matrix.arch }}/server/* ./artifacts-${{ matrix.arch }}/AdaptixC2Server-${{ matrix.arch }}
-        cp -r ./output-${{ matrix.arch }}/client/* ./artifacts-${{ matrix.arch }}/AdaptixC2Client-${{ matrix.arch }}.AppImage
-        cp -r ./output-${{ matrix.arch }}/extender/* ./artifacts-${{ matrix.arch }}/AdaptixC2Extender-${{ matrix.arch }}
+        mkdir -p artifacts-${{ matrix.arch }}
 
-    - name: Create GitHub Release (amd64 only)
+        cp -r out-${{ matrix.arch }}/server-dist/server \
+          artifacts-${{ matrix.arch }}/AdaptixC2Server-${{ matrix.arch }}
+
+        cp -r out-${{ matrix.arch }}/server-dist/client \
+          artifacts-${{ matrix.arch }}/AdaptixC2Client-${{ matrix.arch }}.AppImage
+
+        cp -r out-${{ matrix.arch }}/server-dist/extenders \
+          artifacts-${{ matrix.arch }}/AdaptixC2Extender-${{ matrix.arch }}
+
+    - name: Create GitHub Release (once)
       if: matrix.arch == 'amd64'
-      id: create_release
+      id: release
       uses: actions/create-release@v1
       with:
-        tag_name: v${{ github.run_number }}
-        release_name: AdaptixC2 Build ${{ github.run_number }}
+        tag_name: ${{ needs.prepare.outputs.version }}
+        release_name: AdaptixC2 ${{ needs.prepare.outputs.version }}
         draft: false
         prerelease: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Upload server binary
+    - name: Upload Server
       uses: actions/upload-release-asset@v1
       with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./artifacts-${{ matrix.arch }}/AdaptixC2Server-${{ matrix.arch }}
+        upload_url: ${{ steps.release.outputs.upload_url }}
+        asset_path: artifacts-${{ matrix.arch }}/AdaptixC2Server-${{ matrix.arch }}
         asset_name: AdaptixC2Server-${{ matrix.arch }}
         asset_content_type: application/octet-stream
 
-    - name: Upload client AppImage
+    - name: Upload Client
       uses: actions/upload-release-asset@v1
       with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./artifacts-${{ matrix.arch }}/AdaptixC2Client-${{ matrix.arch }}.AppImage
+        upload_url: ${{ steps.release.outputs.upload_url }}
+        asset_path: artifacts-${{ matrix.arch }}/AdaptixC2Client-${{ matrix.arch }}.AppImage
         asset_name: AdaptixC2Client-${{ matrix.arch }}.AppImage
         asset_content_type: application/octet-stream
 
-    - name: Upload extender binary
+    - name: Upload Extender
       uses: actions/upload-release-asset@v1
       with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./artifacts-${{ matrix.arch }}/AdaptixC2Extender-${{ matrix.arch }}
+        upload_url: ${{ steps.release.outputs.upload_url }}
+        asset_path: artifacts-${{ matrix.arch }}/AdaptixC2Extender-${{ matrix.arch }}
         asset_name: AdaptixC2Extender-${{ matrix.arch }}
         asset_content_type: application/octet-stream
